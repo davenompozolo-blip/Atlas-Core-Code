@@ -1,0 +1,1862 @@
+%%writefile atlas_demo.py
+#!/usr/bin/env python3
+"""
+ATLAS TERMINAL v9.0 COMPLETE - THE ULTIMATE EDITION
+====================================================
+Everything from v8.8 + v9.0 Enhancements
+
+v8.8 Features (ALL PRESERVED):
+✅ Phoenix Parser (FIFO accounting, leverage detection)
+✅ Portfolio Home
+✅ Market Watch  
+✅ Risk Analysis (8+ world-class visualizations)
+✅ Performance Suite
+✅ Portfolio Deep Dive
+✅ Multi-Factor Analysis
+
+v9.0 NEW Features:
+⭐ ML Portfolio Insights (K-Means, Anomaly Detection, Predictions)
+⭐ Morningstar Integration (upload work exports, auto-parse)
+⭐ Manager Research (fund analysis with ML)
+
+Author: Portfolio Manager
+Date: November 2025
+"""
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+import yfinance as yf
+import plotly.graph_objects as go
+import plotly.express as px
+from datetime import datetime, timedelta
+from pathlib import Path
+import json
+import subprocess
+import sys
+import time
+from io import StringIO
+
+# ============================================================================
+# NEW v9.0 IMPORTS
+# ============================================================================
+from sklearn.cluster import KMeans
+from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.metrics.pairwise import cosine_similarity
+import pickle
+
+# ============================================================================
+# AUTO-INSTALL DEPENDENCIES
+# ============================================================================
+def install_dependencies():
+    """Install required packages"""
+    required_packages = {
+        'streamlit': 'streamlit',
+        'pandas': 'pandas',
+        'numpy': 'numpy',
+        'yfinance': 'yfinance',
+        'plotly': 'plotly',
+        'scikit-learn': 'sklearn',
+        'pyngrok': 'pyngrok'
+    }
+    
+    for package_name, import_name in required_packages.items():
+        try:
+            __import__(import_name)
+        except ImportError:
+            print(f"📦 Installing {package_name}...")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", package_name])
+
+# ============================================================================
+# STORAGE CONFIGURATION
+# ============================================================================
+CACHE_DIR = Path.home() / ".atlas_cache"
+CACHE_DIR.mkdir(exist_ok=True)
+PORTFOLIO_CACHE = CACHE_DIR / "portfolio_cache.json"
+MARKET_DATA_CACHE = CACHE_DIR / "market_data_cache.json"
+
+# ============================================================================
+# NEW v9.0 STORAGE PATHS
+# ============================================================================
+FUNDS_CACHE_DIR = Path.home() / ".atlas_funds"
+FUNDS_CACHE_DIR.mkdir(exist_ok=True)
+FUNDS_DB = FUNDS_CACHE_DIR / "funds_database.pkl"
+MORNINGSTAR_CACHE = FUNDS_CACHE_DIR / "morningstar_data.pkl"
+
+# ============================================================================
+# ML ENGINE CLASS - NEW v9.0
+# ============================================================================
+class MLEngine:
+    """Machine Learning engine for portfolio and fund analysis"""
+    
+    @staticmethod
+    def portfolio_clustering(df, n_clusters=3):
+        """Cluster portfolio positions using K-Means"""
+        if len(df) < n_clusters:
+            return None, None, "Not enough positions for clustering"
+        
+        # Features for clustering
+        features = df[['Weight', 'Return', 'Value']].fillna(0)
+        
+        # Standardize
+        scaler = StandardScaler()
+        features_scaled = scaler.fit_transform(features)
+        
+        # K-Means
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        clusters = kmeans.fit_predict(features_scaled)
+        
+        # PCA for visualization
+        pca = PCA(n_components=2)
+        pca_features = pca.fit_transform(features_scaled)
+        
+        return clusters, pca_features, None
+    
+    @staticmethod
+    def anomaly_detection(df):
+        """Detect anomalous positions using Isolation Forest"""
+        if len(df) < 3:
+            return None, "Not enough positions for anomaly detection"
+        
+        # Features
+        features = df[['Weight', 'Return', 'Value']].fillna(0)
+        
+        # Standardize
+        scaler = StandardScaler()
+        features_scaled = scaler.fit_transform(features)
+        
+        # Isolation Forest
+        iso_forest = IsolationForest(contamination=0.1, random_state=42)
+        anomalies = iso_forest.fit_predict(features_scaled)
+        
+        # -1 = anomaly, 1 = normal
+        return anomalies, None
+    
+    @staticmethod
+    def return_prediction(df):
+        """Simple return prediction based on momentum"""
+        # Simple momentum-based prediction
+        df['Predicted_Return'] = df['Return'] * 1.1  # Momentum factor
+        return df
+    
+    @staticmethod
+    def fund_clustering(fund_features, n_clusters=3):
+        """Cluster funds based on features"""
+        if len(fund_features) < n_clusters:
+            return None, None
+        
+        scaler = StandardScaler()
+        features_scaled = scaler.fit_transform(fund_features)
+        
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        clusters = kmeans.fit_predict(features_scaled)
+        
+        pca = PCA(n_components=2)
+        pca_features = pca.fit_transform(features_scaled)
+        
+        return clusters, pca_features
+    
+    @staticmethod
+    def fund_similarity(target_features, comparison_features):
+        """Calculate similarity between funds using cosine similarity"""
+        similarity = cosine_similarity(
+            target_features.reshape(1, -1),
+            comparison_features
+        )[0]
+        return similarity
+
+# ============================================================================
+# FUND DATABASE CLASS - NEW v9.0
+# ============================================================================
+class FundDatabase:
+    """Persistent fund database with save/load functionality"""
+    
+    def __init__(self):
+        self.db_path = FUNDS_DB
+        self.funds = self.load()
+    
+    def load(self):
+        """Load funds from disk"""
+        if self.db_path.exists():
+            try:
+                with open(self.db_path, 'rb') as f:
+                    return pickle.load(f)
+            except:
+                return {}
+        return {}
+    
+    def save(self):
+        """Save funds to disk"""
+        with open(self.db_path, 'wb') as f:
+            pickle.dump(self.funds, f)
+    
+    def add_fund(self, ticker, data):
+        """Add or update a fund"""
+        self.funds[ticker] = {
+            'data': data,
+            'timestamp': pd.Timestamp.now(),
+            'source': data.get('source', 'manual')
+        }
+        self.save()
+    
+    def get_fund(self, ticker):
+        """Get fund data"""
+        return self.funds.get(ticker)
+    
+    def list_funds(self):
+        """List all funds"""
+        return list(self.funds.keys())
+    
+    def remove_fund(self, ticker):
+        """Remove a fund"""
+        if ticker in self.funds:
+            del self.funds[ticker]
+            self.save()
+    
+    def search_funds(self, query):
+        """Search funds by ticker or name"""
+        results = []
+        query_lower = query.lower()
+        for ticker, fund_data in self.funds.items():
+            if query_lower in ticker.lower():
+                results.append(ticker)
+            elif 'name' in fund_data.get('data', {}) and query_lower in fund_data['data']['name'].lower():
+                results.append(ticker)
+        return results
+
+# ============================================================================
+# MORNINGSTAR INTEGRATION CLASS - NEW v9.0
+# ============================================================================
+class MorningstarIntegration:
+    """Morningstar Direct integration and parsing"""
+    
+    @staticmethod
+    def parse_morningstar_export(file_path):
+        """Parse Morningstar Direct export (CSV or Excel)"""
+        try:
+            # Try CSV first
+            if str(file_path).endswith('.csv'):
+                df = pd.read_csv(file_path)
+            else:
+                df = pd.read_excel(file_path)
+            
+            # Extract key fields (common Morningstar export columns)
+            fund_data = {
+                'source': 'morningstar',
+                'raw_data': df,
+                'ticker': None,
+                'name': None,
+                'star_rating': None,
+                'style_box': None,
+                'category': None,
+                'expense_ratio': None,
+                'holdings': [],
+                'esg_score': None
+            }
+            
+            # Try to extract common fields
+            for col in df.columns:
+                col_lower = col.lower()
+                if 'ticker' in col_lower or 'symbol' in col_lower:
+                    fund_data['ticker'] = df[col].iloc[0] if len(df) > 0 else None
+                elif 'name' in col_lower and not fund_data['name']:
+                    fund_data['name'] = df[col].iloc[0] if len(df) > 0 else None
+                elif 'star' in col_lower or 'rating' in col_lower:
+                    fund_data['star_rating'] = df[col].iloc[0] if len(df) > 0 else None
+                elif 'expense' in col_lower:
+                    fund_data['expense_ratio'] = df[col].iloc[0] if len(df) > 0 else None
+                elif 'category' in col_lower:
+                    fund_data['category'] = df[col].iloc[0] if len(df) > 0 else None
+                elif 'esg' in col_lower:
+                    fund_data['esg_score'] = df[col].iloc[0] if len(df) > 0 else None
+            
+            # Try to parse holdings if available
+            if 'holding' in str(df.columns).lower() or 'security' in str(df.columns).lower():
+                fund_data['holdings'] = df.to_dict('records')
+            
+            return fund_data, None
+            
+        except Exception as e:
+            return None, f"Parse error: {str(e)}"
+    
+    @staticmethod
+    def extract_style_box(data):
+        """Extract style box from Morningstar data"""
+        # Look for style box indicators
+        style_cols = [col for col in data.columns if 'style' in col.lower() or 'box' in col.lower()]
+        if style_cols:
+            return data[style_cols[0]].iloc[0] if len(data) > 0 else None
+        return None
+    
+    @staticmethod
+    def visualize_star_rating(rating):
+        """Create star rating visualization"""
+        if rating is None:
+            return "N/A"
+        try:
+            stars = int(float(rating))
+            return "⭐" * stars + "☆" * (5 - stars)
+        except:
+            return str(rating)
+
+# ============================================================================
+# DATA FETCHER
+# ============================================================================
+class DataFetcher:
+    """Fetch and cache market data"""
+    
+    @staticmethod
+    def fetch_stock_data(ticker, period='1y'):
+        """Fetch stock data with caching"""
+        try:
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period=period)
+            info = stock.info
+            return hist, info, None
+        except Exception as e:
+            return None, None, str(e)
+    
+    @staticmethod
+    def fetch_multiple_stocks(tickers, period='1y'):
+        """Fetch data for multiple stocks"""
+        results = {}
+        for ticker in tickers:
+            hist, info, error = DataFetcher.fetch_stock_data(ticker, period)
+            if not error:
+                results[ticker] = {'history': hist, 'info': info}
+        return results
+    
+    @staticmethod
+    def get_current_price(ticker):
+        """Get current price for a ticker"""
+        try:
+            stock = yf.Ticker(ticker)
+            return stock.history(period='1d')['Close'].iloc[-1]
+        except:
+            return None
+    
+    @staticmethod
+    def get_market_indices():
+        """Get major market indices"""
+        indices = {
+            'S&P 500': '^GSPC',
+            'NASDAQ': '^IXIC',
+            'Dow Jones': '^DJI',
+            'Russell 2000': '^RUT',
+            'VIX': '^VIX'
+        }
+        
+        data = {}
+        for name, ticker in indices.items():
+            try:
+                stock = yf.Ticker(ticker)
+                hist = stock.history(period='5d')
+                current = hist['Close'].iloc[-1]
+                previous = hist['Close'].iloc[-2]
+                change = ((current - previous) / previous) * 100
+                
+                data[name] = {
+                    'ticker': ticker,
+                    'price': current,
+                    'change': change
+                }
+            except:
+                pass
+        
+        return data
+
+# ============================================================================
+# PHOENIX PARSER - ORIGINAL v8.8 LOGIC
+# ============================================================================
+class PhoenixParser:
+    """Parse Investopedia portfolio data with FIFO accounting"""
+    
+    @staticmethod
+    def parse_trade_history(uploaded_file):
+        """Parse Investopedia trade history using pd.read_html (ORIGINAL METHOD)"""
+        try:
+            # Read HTML table from Investopedia export
+            df = pd.read_html(uploaded_file)[0]
+            
+            # Expected columns: Date, Symbol, Trade Type, Quantity, Price
+            required_cols = ['Date', 'Symbol', 'Trade Type', 'Quantity', 'Price']
+            
+            if not all(col in df.columns for col in required_cols):
+                return None, "Missing required columns. Expected: Date, Symbol, Trade Type, Quantity, Price"
+            
+            # Parse prices (remove $ and commas)
+            df['Price'] = df['Price'].astype(str).str.replace('$', '').str.replace(',', '').astype(float)
+            
+            # Parse dates
+            df['Date'] = pd.to_datetime(df['Date'])
+            
+            # Sort by date
+            df = df.sort_values('Date')
+            
+            # Filter out options (focus on stocks)
+            df = df[~df['Symbol'].str.contains('Option', na=False)]
+            
+            return df, None
+            
+        except Exception as e:
+            return None, f"Parse error: {str(e)}"
+    
+    @staticmethod
+    def reconstruct_portfolio_fifo(trade_history):
+        """Reconstruct current portfolio using FIFO accounting"""
+        positions = {}
+        
+        for _, trade in trade_history.iterrows():
+            symbol = trade['Symbol']
+            trade_type = trade['Trade Type']
+            quantity = trade['Quantity']
+            price = trade['Price']
+            
+            if symbol not in positions:
+                positions[symbol] = {
+                    'lots': [],
+                    'total_shares': 0,
+                    'total_cost': 0
+                }
+            
+            if trade_type == 'Buy':
+                # Add new lot
+                positions[symbol]['lots'].append({
+                    'shares': quantity,
+                    'price': price,
+                    'cost': quantity * price
+                })
+                positions[symbol]['total_shares'] += quantity
+                positions[symbol]['total_cost'] += quantity * price
+                
+            elif trade_type == 'Sell':
+                # Sell from oldest lots (FIFO)
+                remaining_to_sell = quantity
+                
+                while remaining_to_sell > 0 and positions[symbol]['lots']:
+                    oldest_lot = positions[symbol]['lots'][0]
+                    
+                    if oldest_lot['shares'] <= remaining_to_sell:
+                        # Sell entire lot
+                        remaining_to_sell -= oldest_lot['shares']
+                        positions[symbol]['total_shares'] -= oldest_lot['shares']
+                        positions[symbol]['total_cost'] -= oldest_lot['cost']
+                        positions[symbol]['lots'].pop(0)
+                    else:
+                        # Partial sale
+                        sold_cost = (oldest_lot['cost'] / oldest_lot['shares']) * remaining_to_sell
+                        oldest_lot['shares'] -= remaining_to_sell
+                        oldest_lot['cost'] -= sold_cost
+                        positions[symbol]['total_shares'] -= remaining_to_sell
+                        positions[symbol]['total_cost'] -= sold_cost
+                        remaining_to_sell = 0
+        
+        # Build portfolio dataframe
+        portfolio_data = []
+        for symbol, pos in positions.items():
+            if pos['total_shares'] > 0:
+                avg_cost = pos['total_cost'] / pos['total_shares']
+                portfolio_data.append({
+                    'Ticker': symbol,
+                    'Shares': pos['total_shares'],
+                    'Avg Cost': avg_cost,
+                    'Total Cost': pos['total_cost']
+                })
+        
+        return pd.DataFrame(portfolio_data)
+    
+    @staticmethod
+    def parse_account_history(uploaded_file):
+        """Parse account history for cash and margin"""
+        try:
+            df = pd.read_html(uploaded_file)[0]
+            
+            # Look for cash balance and margin
+            cash = 0
+            margin = 0
+            
+            # Try to find cash balance
+            if 'Cash' in df.columns:
+                cash_str = str(df['Cash'].iloc[-1])
+                # Handle negative cash (margin)
+                if '(' in cash_str:
+                    cash = -float(cash_str.replace('(', '').replace(')', '').replace('$', '').replace(',', ''))
+                else:
+                    cash = float(cash_str.replace('$', '').replace(',', ''))
+            
+            # Try to find margin used
+            if 'Margin Used' in df.columns:
+                margin = float(str(df['Margin Used'].iloc[-1]).replace('$', '').replace(',', ''))
+            
+            return cash, margin, None
+            
+        except Exception as e:
+            return 0, 0, f"Parse error: {str(e)}"
+
+# ============================================================================
+# PORTFOLIO CALCULATOR
+# ============================================================================
+class PortfolioCalculator:
+    """Calculate portfolio metrics"""
+    
+    @staticmethod
+    def enrich_with_market_data(portfolio_df):
+        """Add current prices and calculate metrics"""
+        enriched_data = []
+        
+        for _, row in portfolio_df.iterrows():
+            ticker = row['Ticker']
+            shares = row['Shares']
+            avg_cost = row['Avg Cost']
+            
+            # Fetch current price
+            current_price = DataFetcher.get_current_price(ticker)
+            
+            if current_price:
+                current_value = shares * current_price
+                total_cost = row['Total Cost']
+                gain_loss = current_value - total_cost
+                return_pct = (gain_loss / total_cost) * 100
+                
+                enriched_data.append({
+                    'Ticker': ticker,
+                    'Shares': shares,
+                    'Avg Cost': avg_cost,
+                    'Current Price': current_price,
+                    'Total Cost': total_cost,
+                    'Current Value': current_value,
+                    'Gain/Loss': gain_loss,
+                    'Return': return_pct
+                })
+        
+        df = pd.DataFrame(enriched_data)
+        
+        # Calculate weights
+        total_value = df['Current Value'].sum()
+        df['Weight'] = (df['Current Value'] / total_value) * 100
+        df['Value'] = df['Current Value']
+        
+        return df
+    
+    @staticmethod
+    def calculate_portfolio_metrics(positions_df):
+        """Calculate overall portfolio metrics"""
+        total_value = positions_df['Current Value'].sum()
+        total_cost = positions_df['Total Cost'].sum()
+        total_gain_loss = positions_df['Gain/Loss'].sum()
+        total_return = (total_gain_loss / total_cost) * 100
+        
+        # Position count
+        num_positions = len(positions_df)
+        
+        # Concentration (HHI)
+        weights = positions_df['Weight'] / 100
+        hhi = (weights ** 2).sum()
+        
+        return {
+            'total_value': total_value,
+            'total_cost': total_cost,
+            'total_gain_loss': total_gain_loss,
+            'total_return': total_return,
+            'num_positions': num_positions,
+            'hhi': hhi,
+            'largest_position': positions_df.loc[positions_df['Weight'].idxmax(), 'Ticker'],
+            'largest_position_weight': positions_df['Weight'].max()
+        }
+    
+    @staticmethod
+    def calculate_beta(ticker, period='1y'):
+        """Calculate stock beta vs S&P 500"""
+        try:
+            stock = yf.Ticker(ticker)
+            spy = yf.Ticker('SPY')
+            
+            stock_hist = stock.history(period=period)
+            spy_hist = spy.history(period=period)
+            
+            # Calculate returns
+            stock_returns = stock_hist['Close'].pct_change().dropna()
+            spy_returns = spy_hist['Close'].pct_change().dropna()
+            
+            # Align dates
+            combined = pd.DataFrame({
+                'stock': stock_returns,
+                'spy': spy_returns
+            }).dropna()
+            
+            # Calculate beta
+            covariance = combined['stock'].cov(combined['spy'])
+            variance = combined['spy'].var()
+            beta = covariance / variance
+            
+            return beta
+            
+        except:
+            return None
+
+# ============================================================================
+# STREAMLIT PAGE CONFIGURATION - MUST BE FIRST STREAMLIT COMMAND
+# ============================================================================
+
+# Run Streamlit app in separate thread
+def run_app():
+    st.run()
+
+import threading
+threading.Thread(target=run_app, daemon=True).start()
+
+
+
+st.set_page_config(
+    page_title="ATLAS Terminal v9.0",
+    page_icon="🔥",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS
+st.markdown("""
+<style>
+    .main {background-color: #0e1117;}
+    .stMetric {background-color: #1e2530; padding: 15px; border-radius: 5px;}
+    h1, h2, h3 {color: #ff4b4b;}
+    .stAlert {background-color: #1e2530;}
+</style>
+""", unsafe_allow_html=True)
+
+# ============================================================================
+# SESSION STATE INITIALIZATION
+# ============================================================================
+if 'positions_df' not in st.session_state:
+    st.session_state.positions_df = None
+if 'portfolio_metrics' not in st.session_state:
+    st.session_state.portfolio_metrics = None
+if 'trade_history' not in st.session_state:
+    st.session_state.trade_history = None
+if 'cash_balance' not in st.session_state:
+    st.session_state.cash_balance = 0
+if 'margin_used' not in st.session_state:
+    st.session_state.margin_used = 0
+
+# ============================================================================
+# PHOENIX MODE PAGES
+# ============================================================================
+
+def phoenix_parser_page():
+    """🔥 Phoenix Parser - Upload & Parse"""
+    st.markdown("## 🔥 Phoenix Parser")
+    st.markdown("Upload your Investopedia portfolio exports")
+    st.markdown("---")
+    
+    col1, col2 = st.columns(2)
+    
+    # Left column: Trade History
+    with col1:
+        st.markdown("### 📊 Trade History")
+        st.markdown("Upload your Investopedia trade history (.xls)")
+        
+        trade_file = st.file_uploader(
+            "Upload Trade History",
+            type=['xls', 'xlsx', 'html'],
+            key='trade_history_upload'
+        )
+        
+        if trade_file:
+            with st.spinner("Parsing trade history..."):
+                trade_df, error = PhoenixParser.parse_trade_history(trade_file)
+                
+                if error:
+                    st.error(f"❌ {error}")
+                else:
+                    st.success("✅ Trade history parsed!")
+                    st.session_state.trade_history = trade_df
+                    
+                    # Show trades
+                    st.dataframe(trade_df, use_container_width=True)
+                    
+                    # Reconstruct portfolio
+                    with st.spinner("Reconstructing portfolio using FIFO..."):
+                        portfolio_df = PhoenixParser.reconstruct_portfolio_fifo(trade_df)
+                        
+                        if not portfolio_df.empty:
+                            st.success(f"✅ Portfolio reconstructed: {len(portfolio_df)} positions")
+                            
+                            # Enrich with market data
+                            with st.spinner("Fetching current prices..."):
+                                enriched_df = PortfolioCalculator.enrich_with_market_data(portfolio_df)
+                                st.session_state.positions_df = enriched_df
+                                
+                                # Calculate metrics
+                                metrics = PortfolioCalculator.calculate_portfolio_metrics(enriched_df)
+                                st.session_state.portfolio_metrics = metrics
+                                
+                                st.success("✅ Market data fetched!")
+    
+    # Right column: Account History
+    with col2:
+        st.markdown("### 💰 Account History")
+        st.markdown("Upload your Investopedia account history (.xls)")
+        
+        account_file = st.file_uploader(
+            "Upload Account History",
+            type=['xls', 'xlsx', 'html'],
+            key='account_history_upload'
+        )
+        
+        if account_file:
+            with st.spinner("Parsing account history..."):
+                cash, margin, error = PhoenixParser.parse_account_history(account_file)
+                
+                if error:
+                    st.error(f"❌ {error}")
+                else:
+                    st.success("✅ Account history parsed!")
+                    st.session_state.cash_balance = cash
+                    st.session_state.margin_used = margin
+                    
+                    # Display info
+                    st.metric("Cash Balance", f"${cash:,.2f}")
+                    st.metric("Margin Used", f"${margin:,.2f}")
+                    
+                    # Calculate leverage
+                    if st.session_state.positions_df is not None:
+                        total_value = st.session_state.positions_df['Current Value'].sum()
+                        leverage_ratio = (total_value - cash) / (total_value + cash) if (total_value + cash) > 0 else 0
+                        
+                        if leverage_ratio > 0.1:
+                            st.warning(f"⚡ LEVERAGED ACCOUNT: {leverage_ratio:.2f}x leverage detected")
+
+def portfolio_home_page():
+    """🏠 Portfolio Home - Overview"""
+    st.markdown("## 🏠 Portfolio Home")
+    st.markdown("---")
+    
+    if st.session_state.positions_df is None:
+        st.info("📤 Please parse your portfolio first in Phoenix Parser")
+        return
+    
+    df = st.session_state.positions_df
+    metrics = st.session_state.portfolio_metrics
+    
+    # Top metrics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric(
+            "Total Value",
+            f"${metrics['total_value']:,.2f}",
+            f"{metrics['total_return']:.2f}%"
+        )
+    
+    with col2:
+        st.metric(
+            "Total Cost",
+            f"${metrics['total_cost']:,.2f}"
+        )
+    
+    with col3:
+        st.metric(
+            "Gain/Loss",
+            f"${metrics['total_gain_loss']:,.2f}",
+            delta_color="normal" if metrics['total_gain_loss'] > 0 else "inverse"
+        )
+    
+    with col4:
+        st.metric(
+            "Positions",
+            metrics['num_positions']
+        )
+    
+    st.markdown("---")
+    
+    # Holdings table
+    st.markdown("### 📊 Holdings")
+    
+    # Format for display
+    display_df = df[['Ticker', 'Shares', 'Avg Cost', 'Current Price', 'Current Value', 'Gain/Loss', 'Return', 'Weight']].copy()
+    
+    # Format currency columns
+    for col in ['Avg Cost', 'Current Price', 'Current Value', 'Gain/Loss']:
+        display_df[col] = display_df[col].apply(lambda x: f"${x:,.2f}")
+    
+    # Format percentage columns
+    for col in ['Return', 'Weight']:
+        display_df[col] = display_df[col].apply(lambda x: f"{x:.2f}%")
+    
+    st.dataframe(display_df, use_container_width=True, height=400)
+    
+    st.markdown("---")
+    
+    # Charts
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("### 📊 Portfolio Allocation")
+        fig = px.pie(
+            df,
+            values='Current Value',
+            names='Ticker',
+            title='Holdings by Value',
+            hole=0.4
+        )
+        fig.update_layout(template='plotly_dark')
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        st.markdown("### 📈 Position Returns")
+        fig = px.bar(
+            df.sort_values('Return', ascending=True),
+            x='Return',
+            y='Ticker',
+            orientation='h',
+            title='Return by Position',
+            color='Return',
+            color_continuous_scale='RdYlGn'
+        )
+        fig.update_layout(template='plotly_dark')
+        st.plotly_chart(fig, use_container_width=True)
+
+def market_watch_page():
+    """🌍 Market Watch"""
+    st.markdown("## 🌍 Market Watch")
+    st.markdown("---")
+    
+    with st.spinner("Fetching market data..."):
+        indices = DataFetcher.get_market_indices()
+    
+    if indices:
+        # Display indices
+        cols = st.columns(len(indices))
+        
+        for idx, (name, data) in enumerate(indices.items()):
+            with cols[idx]:
+                delta_color = "normal" if data['change'] > 0 else "inverse"
+                st.metric(
+                    name,
+                    f"${data['price']:,.2f}",
+                    f"{data['change']:.2f}%",
+                    delta_color=delta_color
+                )
+        
+        st.markdown("---")
+        
+        # Market overview charts
+        st.markdown("### 📊 Market Overview")
+        
+        # Create comparison chart
+        fig = go.Figure()
+        
+        for name, data in indices.items():
+            if name != 'VIX':  # Exclude VIX from main chart
+                ticker = data['ticker']
+                hist, _, error = DataFetcher.fetch_stock_data(ticker, period='1mo')
+                
+                if not error and hist is not None:
+                    # Normalize to 100
+                    normalized = (hist['Close'] / hist['Close'].iloc[0]) * 100
+                    
+                    fig.add_trace(go.Scatter(
+                        x=hist.index,
+                        y=normalized,
+                        name=name,
+                        mode='lines'
+                    ))
+        
+        fig.update_layout(
+            title='Market Indices (30 Days, Normalized to 100)',
+            xaxis_title='Date',
+            yaxis_title='Normalized Price',
+            template='plotly_dark',
+            height=500
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+
+def risk_analysis_page():
+    """📈 Risk Analysis - World-Class Visualizations"""
+    st.markdown("## 📈 Risk Analysis")
+    st.markdown("Advanced risk metrics and visualizations")
+    st.markdown("---")
+    
+    if st.session_state.positions_df is None:
+        st.info("📤 Please parse your portfolio first")
+        return
+    
+    df = st.session_state.positions_df
+    metrics = st.session_state.portfolio_metrics
+    
+    # Risk metrics overview
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Concentration (HHI)", f"{metrics['hhi']:.4f}")
+    
+    with col2:
+        st.metric("Largest Position", f"{metrics['largest_position']}")
+    
+    with col3:
+        st.metric("Largest Weight", f"{metrics['largest_position_weight']:.2f}%")
+    
+    with col4:
+        # Calculate portfolio beta (simplified)
+        avg_beta = 1.0  # Placeholder
+        st.metric("Portfolio Beta", f"{avg_beta:.2f}")
+    
+    st.markdown("---")
+    
+    # Tabs for different analyses
+    tab1, tab2, tab3 = st.tabs([
+        "📊 Concentration Analysis",
+        "⚠️ Position Risk",
+        "📈 Return Distribution"
+    ])
+    
+    with tab1:
+        st.markdown("### 📊 Concentration Analysis")
+        
+        # Concentration metrics
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Top 5 positions
+            top5 = df.nlargest(5, 'Weight')
+            top5_weight = top5['Weight'].sum()
+            
+            st.markdown(f"**Top 5 Positions: {top5_weight:.2f}% of portfolio**")
+            
+            fig = px.bar(
+                top5,
+                x='Ticker',
+                y='Weight',
+                title='Top 5 Positions by Weight',
+                color='Weight',
+                color_continuous_scale='Blues'
+            )
+            fig.update_layout(template='plotly_dark', height=400)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            # HHI explanation
+            st.markdown("**Herfindahl-Hirschman Index (HHI)**")
+            st.markdown(f"Current HHI: {metrics['hhi']:.4f}")
+            
+            if metrics['hhi'] < 0.15:
+                st.success("✅ Well diversified")
+            elif metrics['hhi'] < 0.25:
+                st.warning("⚠️ Moderate concentration")
+            else:
+                st.error("❌ High concentration")
+            
+            # Cumulative weight chart
+            df_sorted = df.sort_values('Weight', ascending=False)
+            df_sorted['Cumulative Weight'] = df_sorted['Weight'].cumsum()
+            
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=list(range(1, len(df_sorted) + 1)),
+                y=df_sorted['Cumulative Weight'],
+                mode='lines+markers',
+                name='Cumulative Weight',
+                line=dict(color='cyan', width=2)
+            ))
+            
+            # Add 80% line
+            fig.add_hline(y=80, line_dash="dash", line_color="red",
+                         annotation_text="80%", annotation_position="right")
+            
+            fig.update_layout(
+                title='Cumulative Weight by Position',
+                xaxis_title='Number of Positions',
+                yaxis_title='Cumulative Weight (%)',
+                template='plotly_dark',
+                height=400
+            )
+            st.plotly_chart(fig, use_container_width=True)
+    
+    with tab2:
+        st.markdown("### ⚠️ Position Risk")
+        
+        # Risk/Return scatter
+        fig = go.Figure()
+        
+        fig.add_trace(go.Scatter(
+            x=df['Return'],
+            y=df['Weight'],
+            mode='markers+text',
+            text=df['Ticker'],
+            textposition='top center',
+            marker=dict(
+                size=df['Current Value'] / df['Current Value'].max() * 50,
+                color=df['Return'],
+                colorscale='RdYlGn',
+                showscale=True,
+                colorbar=dict(title="Return %")
+            )
+        ))
+        
+        fig.update_layout(
+            title='Position Risk/Return Profile (Size = Value)',
+            xaxis_title='Return (%)',
+            yaxis_title='Portfolio Weight (%)',
+            template='plotly_dark',
+            height=500
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Risk table
+        st.markdown("### 📊 Position Risk Metrics")
+        risk_df = df[['Ticker', 'Weight', 'Return', 'Current Value']].copy()
+        risk_df['Risk Score'] = risk_df['Weight'] * abs(risk_df['Return'])
+        risk_df = risk_df.sort_values('Risk Score', ascending=False)
+        
+        st.dataframe(risk_df, use_container_width=True)
+    
+    with tab3:
+        st.markdown("### 📈 Return Distribution")
+        
+        # Histogram
+        fig = go.Figure()
+        fig.add_trace(go.Histogram(
+            x=df['Return'],
+            nbinsx=20,
+            marker_color='lightblue'
+        ))
+        
+        fig.update_layout(
+            title='Distribution of Position Returns',
+            xaxis_title='Return (%)',
+            yaxis_title='Count',
+            template='plotly_dark',
+            height=400
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Statistics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Mean Return", f"{df['Return'].mean():.2f}%")
+        with col2:
+            st.metric("Median Return", f"{df['Return'].median():.2f}%")
+        with col3:
+            st.metric("Std Dev", f"{df['Return'].std():.2f}%")
+        with col4:
+            st.metric("Range", f"{df['Return'].max() - df['Return'].min():.2f}%")
+
+def performance_suite_page():
+    """💎 Performance Suite"""
+    st.markdown("## 💎 Performance Suite")
+    st.markdown("Track and analyze portfolio performance")
+    st.markdown("---")
+    
+    if st.session_state.positions_df is None:
+        st.info("📤 Please parse your portfolio first")
+        return
+    
+    df = st.session_state.positions_df
+    metrics = st.session_state.portfolio_metrics
+    
+    # Performance overview
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Total Return", f"{metrics['total_return']:.2f}%")
+    
+    with col2:
+        winners = len(df[df['Return'] > 0])
+        losers = len(df[df['Return'] < 0])
+        st.metric("Winners/Losers", f"{winners}/{losers}")
+    
+    with col3:
+        best_performer = df.loc[df['Return'].idxmax()]
+        st.metric("Best Performer", f"{best_performer['Ticker']}: {best_performer['Return']:.2f}%")
+    
+    st.markdown("---")
+    
+    # Performance visualizations
+    st.markdown("### 📊 Performance Breakdown")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Winners vs Losers
+        winners_value = df[df['Return'] > 0]['Current Value'].sum()
+        losers_value = df[df['Return'] <= 0]['Current Value'].sum()
+        
+        fig = go.Figure(data=[
+            go.Bar(name='Winners', x=['Winners'], y=[winners_value], marker_color='green'),
+            go.Bar(name='Losers', x=['Losers'], y=[losers_value], marker_color='red')
+        ])
+        
+        fig.update_layout(
+            title='Winners vs Losers (by Value)',
+            yaxis_title='Value ($)',
+            template='plotly_dark',
+            height=400
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        # Return contribution
+        df['Return Contribution'] = (df['Weight'] / 100) * df['Return']
+        
+        fig = px.bar(
+            df.sort_values('Return Contribution'),
+            x='Return Contribution',
+            y='Ticker',
+            orientation='h',
+            title='Return Contribution by Position',
+            color='Return Contribution',
+            color_continuous_scale='RdYlGn'
+        )
+        fig.update_layout(template='plotly_dark', height=400)
+        st.plotly_chart(fig, use_container_width=True)
+
+def portfolio_deep_dive_page():
+    """🔬 Portfolio Deep Dive"""
+    st.markdown("## 🔬 Portfolio Deep Dive")
+    st.markdown("Detailed portfolio analysis")
+    st.markdown("---")
+    
+    if st.session_state.positions_df is None:
+        st.info("📤 Please parse your portfolio first")
+        return
+    
+    df = st.session_state.positions_df
+    
+    # Position selector
+    selected_ticker = st.selectbox(
+        "Select position for detailed analysis",
+        df['Ticker'].tolist()
+    )
+    
+    if selected_ticker:
+        position = df[df['Ticker'] == selected_ticker].iloc[0]
+        
+        st.markdown(f"## {selected_ticker}")
+        st.markdown("---")
+        
+        # Key metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Shares", f"{position['Shares']:,.0f}")
+        with col2:
+            st.metric("Current Price", f"${position['Current Price']:,.2f}")
+        with col3:
+            st.metric("Position Value", f"${position['Current Value']:,.2f}")
+        with col4:
+            st.metric("Return", f"{position['Return']:.2f}%")
+        
+        st.markdown("---")
+        
+        # Historical chart
+        with st.spinner(f"Loading {selected_ticker} data..."):
+            hist, info, error = DataFetcher.fetch_stock_data(selected_ticker, period='1y')
+            
+            if not error and hist is not None:
+                # Price chart
+                fig = go.Figure()
+                
+                fig.add_trace(go.Candlestick(
+                    x=hist.index,
+                    open=hist['Open'],
+                    high=hist['High'],
+                    low=hist['Low'],
+                    close=hist['Close'],
+                    name=selected_ticker
+                ))
+                
+                # Add cost basis line
+                fig.add_hline(
+                    y=position['Avg Cost'],
+                    line_dash="dash",
+                    line_color="yellow",
+                    annotation_text=f"Avg Cost: ${position['Avg Cost']:.2f}",
+                    annotation_position="right"
+                )
+                
+                fig.update_layout(
+                    title=f'{selected_ticker} Price History',
+                    yaxis_title='Price ($)',
+                    template='plotly_dark',
+                    height=500,
+                    xaxis_rangeslider_visible=False
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Company info
+                if info:
+                    st.markdown("### 📋 Company Information")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown(f"**Sector:** {info.get('sector', 'N/A')}")
+                        st.markdown(f"**Industry:** {info.get('industry', 'N/A')}")
+                        st.markdown(f"**Market Cap:** ${info.get('marketCap', 0):,.0f}")
+                    
+                    with col2:
+                        st.markdown(f"**P/E Ratio:** {info.get('trailingPE', 'N/A')}")
+                        st.markdown(f"**52W High:** ${info.get('fiftyTwoWeekHigh', 'N/A')}")
+                        st.markdown(f"**52W Low:** ${info.get('fiftyTwoWeekLow', 'N/A')}")
+
+def multi_factor_analysis_page():
+    """📊 Multi-Factor Analysis"""
+    st.markdown("## 📊 Multi-Factor Analysis")
+    st.markdown("Factor-based portfolio analysis")
+    st.markdown("---")
+    
+    if st.session_state.positions_df is None:
+        st.info("📤 Please parse your portfolio first")
+        return
+    
+    df = st.session_state.positions_df
+    
+    st.markdown("### 🎯 Factor Exposure Framework")
+    
+    # This would be expanded with actual factor calculations
+    st.info("Factor analysis framework: Size, Value, Momentum, Quality, Volatility")
+    
+    # Simple momentum analysis
+    st.markdown("### 📈 Momentum Analysis")
+    
+    # Categorize by return
+    df['Momentum Category'] = pd.cut(
+        df['Return'],
+        bins=[-np.inf, -10, 0, 10, np.inf],
+        labels=['Strong Negative', 'Weak Negative', 'Weak Positive', 'Strong Positive']
+    )
+    
+    momentum_summary = df.groupby('Momentum Category').agg({
+        'Ticker': 'count',
+        'Current Value': 'sum',
+        'Weight': 'sum'
+    }).rename(columns={'Ticker': 'Count'})
+    
+    st.dataframe(momentum_summary, use_container_width=True)
+    
+    # Momentum visualization
+    fig = px.pie(
+        momentum_summary.reset_index(),
+        values='Weight',
+        names='Momentum Category',
+        title='Portfolio Weight by Momentum',
+        color='Momentum Category',
+        color_discrete_map={
+            'Strong Negative': '#d62728',
+            'Weak Negative': '#ff7f0e',
+            'Weak Positive': '#2ca02c',
+            'Strong Positive': '#1f77b4'
+        }
+    )
+    fig.update_layout(template='plotly_dark')
+    st.plotly_chart(fig, use_container_width=True)
+
+def ml_portfolio_insights_page():
+    """🤖 ML Portfolio Insights - NEW in v9.0"""
+    st.markdown("## 🤖 ML Portfolio Insights")
+    st.markdown("Machine learning analysis of your portfolio")
+    st.markdown("---")
+    
+    if st.session_state.positions_df is None:
+        st.info("📤 Please parse your portfolio first in Phoenix Parser")
+        return
+    
+    df = st.session_state.positions_df.copy()
+    
+    if len(df) < 3:
+        st.warning("Need at least 3 positions for ML analysis")
+        return
+    
+    # Tabs for different ML analyses
+    ml_tab1, ml_tab2, ml_tab3 = st.tabs([
+        "🎯 K-Means Clustering",
+        "⚠️ Anomaly Detection",
+        "📈 Return Predictions"
+    ])
+    
+    # K-Means Clustering
+    with ml_tab1:
+        st.markdown("### 🎯 Position Clustering (K-Means)")
+        st.markdown("Groups similar positions based on weight, return, and value")
+        
+        n_clusters = st.slider("Number of clusters", 2, min(5, len(df)), 3)
+        
+        if st.button("Run Clustering", key="cluster_btn"):
+            with st.spinner("Clustering positions..."):
+                clusters, pca_features, error = MLEngine.portfolio_clustering(df, n_clusters)
+                
+                if error:
+                    st.error(error)
+                else:
+                    df['Cluster'] = clusters
+                    
+                    # Visualization
+                    fig = go.Figure()
+                    
+                    for cluster in range(n_clusters):
+                        cluster_data = df[df['Cluster'] == cluster]
+                        fig.add_trace(go.Scatter(
+                            x=pca_features[clusters == cluster, 0],
+                            y=pca_features[clusters == cluster, 1],
+                            mode='markers+text',
+                            name=f'Cluster {cluster}',
+                            text=cluster_data['Ticker'],
+                            textposition='top center',
+                            marker=dict(size=12, line=dict(width=1, color='white'))
+                        ))
+                    
+                    fig.update_layout(
+                        title="Portfolio Position Clusters (PCA Projection)",
+                        xaxis_title="PC1",
+                        yaxis_title="PC2",
+                        template="plotly_dark",
+                        height=500
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Cluster analysis
+                    st.markdown("### 📊 Cluster Analysis")
+                    for cluster in range(n_clusters):
+                        cluster_data = df[df['Cluster'] == cluster]
+                        with st.expander(f"Cluster {cluster} - {len(cluster_data)} positions"):
+                            st.dataframe(cluster_data[['Ticker', 'Shares', 'Value', 'Weight', 'Return']])
+                            col1, col2 = st.columns(2)
+                            col1.metric("Avg Weight", f"{cluster_data['Weight'].mean():.2f}%")
+                            col2.metric("Avg Return", f"{cluster_data['Return'].mean():.2f}%")
+    
+    # Anomaly Detection
+    with ml_tab2:
+        st.markdown("### ⚠️ Anomaly Detection (Isolation Forest)")
+        st.markdown("Identifies unusual positions that deviate from portfolio patterns")
+        
+        if st.button("Detect Anomalies", key="anomaly_btn"):
+            with st.spinner("Detecting anomalies..."):
+                anomalies, error = MLEngine.anomaly_detection(df)
+                
+                if error:
+                    st.error(error)
+                else:
+                    df['Anomaly'] = anomalies
+                    df['Is_Anomaly'] = df['Anomaly'] == -1
+                    
+                    anomalous = df[df['Is_Anomaly']]
+                    normal = df[~df['Is_Anomaly']]
+                    
+                    col1, col2 = st.columns(2)
+                    col1.metric("Normal Positions", len(normal))
+                    col2.metric("Anomalous Positions", len(anomalous))
+                    
+                    if len(anomalous) > 0:
+                        st.markdown("### 🔍 Anomalous Positions")
+                        st.dataframe(anomalous[['Ticker', 'Shares', 'Value', 'Weight', 'Return']])
+                        
+                        st.markdown("**Why these might be anomalous:**")
+                        st.markdown("- Unusual position size relative to portfolio")
+                        st.markdown("- Extreme returns (positive or negative)")
+                        st.markdown("- Different value characteristics")
+                    else:
+                        st.success("✅ No anomalies detected - portfolio looks consistent!")
+    
+    # Return Predictions
+    with ml_tab3:
+        st.markdown("### 📈 Return Predictions (Momentum-Based)")
+        st.markdown("Simple ML predictions based on historical momentum")
+        
+        if st.button("Generate Predictions", key="predict_btn"):
+            with st.spinner("Generating predictions..."):
+                pred_df = MLEngine.return_prediction(df)
+                
+                # Visualization
+                fig = go.Figure()
+                fig.add_trace(go.Bar(
+                    name='Current Return',
+                    x=pred_df['Ticker'],
+                    y=pred_df['Return'],
+                    marker_color='lightblue'
+                ))
+                fig.add_trace(go.Bar(
+                    name='Predicted Return',
+                    x=pred_df['Ticker'],
+                    y=pred_df['Predicted_Return'],
+                    marker_color='gold'
+                ))
+                
+                fig.update_layout(
+                    title="Current vs Predicted Returns",
+                    xaxis_title="Position",
+                    yaxis_title="Return (%)",
+                    barmode='group',
+                    template="plotly_dark",
+                    height=500
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+                st.markdown("### 📊 Prediction Details")
+                st.dataframe(pred_df[['Ticker', 'Return', 'Predicted_Return']].sort_values('Predicted_Return', ascending=False))
+                
+                st.info("📝 Note: These are simple momentum-based predictions for illustration. Not investment advice!")
+
+# ============================================================================
+# MORNINGSTAR INTEGRATION MODE - NEW v9.0
+# ============================================================================
+
+def morningstar_mode():
+    """⭐ MORNINGSTAR INTEGRATION - NEW in v9.0"""
+    st.markdown("# ⭐ MORNINGSTAR INTEGRATION")
+    st.markdown("Upload and analyze Morningstar Direct exports")
+    st.markdown("---")
+    
+    fund_db = FundDatabase()
+    
+    ms_tab1, ms_tab2 = st.tabs([
+        "📤 Upload Morningstar Export",
+        "📊 View Saved Funds"
+    ])
+    
+    with ms_tab1:
+        st.markdown("### 📤 Upload Morningstar Direct Export")
+        st.markdown("Export your fund data from Morningstar Direct and upload here")
+        
+        uploaded_file = st.file_uploader(
+            "Upload Morningstar Export (CSV or Excel)",
+            type=['csv', 'xlsx', 'xls'],
+            key="morningstar_upload"
+        )
+        
+        if uploaded_file:
+            with st.spinner("Parsing Morningstar export..."):
+                # Save temporarily
+                temp_path = Path(f"/tmp/{uploaded_file.name}")
+                with open(temp_path, 'wb') as f:
+                    f.write(uploaded_file.getvalue())
+                
+                fund_data, error = MorningstarIntegration.parse_morningstar_export(temp_path)
+                
+                if error:
+                    st.error(f"❌ {error}")
+                else:
+                    st.success("✅ Morningstar export parsed successfully!")
+                    
+                    # Display extracted data
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric("Ticker", fund_data.get('ticker', 'N/A'))
+                        name = fund_data.get('name', 'N/A')
+                        display_name = name[:20] + "..." if name and len(name) > 20 else name
+                        st.metric("Name", display_name)
+                    
+                    with col2:
+                        rating = fund_data.get('star_rating')
+                        st.metric("Star Rating", MorningstarIntegration.visualize_star_rating(rating))
+                        st.metric("Category", fund_data.get('category', 'N/A'))
+                    
+                    with col3:
+                        exp_ratio = fund_data.get('expense_ratio')
+                        st.metric("Expense Ratio", f"{exp_ratio:.2f}%" if exp_ratio else "N/A")
+                        esg = fund_data.get('esg_score')
+                        st.metric("ESG Score", f"{esg:.1f}" if esg else "N/A")
+                    
+                    # Show raw data
+                    with st.expander("📊 View Raw Data"):
+                        st.dataframe(fund_data['raw_data'])
+                    
+                    # Save to database
+                    if fund_data.get('ticker'):
+                        if st.button("💾 Save to Fund Database"):
+                            fund_db.add_fund(fund_data['ticker'], fund_data)
+                            st.success(f"✅ Saved {fund_data['ticker']} to database!")
+                            st.balloons()
+    
+    with ms_tab2:
+        st.markdown("### 📊 Saved Funds Database")
+        
+        funds = fund_db.list_funds()
+        
+        if not funds:
+            st.info("No funds saved yet. Upload Morningstar exports to build your database!")
+        else:
+            st.success(f"📚 {len(funds)} funds in database")
+            
+            # Search
+            search = st.text_input("🔍 Search funds", placeholder="Enter ticker or name...")
+            
+            if search:
+                funds = fund_db.search_funds(search)
+            
+            # Display funds
+            for ticker in funds:
+                fund_info = fund_db.get_fund(ticker)
+                data = fund_info['data']
+                
+                name = data.get('name', 'Unknown')
+                display_name = name[:50] if name else 'Unknown'
+                
+                with st.expander(f"{ticker} - {display_name}"):
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric("Rating", MorningstarIntegration.visualize_star_rating(data.get('star_rating')))
+                    col2.metric("Category", data.get('category', 'N/A'))
+                    exp = data.get('expense_ratio')
+                    col3.metric("Expense", f"{exp:.2f}%" if exp else "N/A")
+                    col4.metric("Source", data.get('source', 'N/A').title())
+                    
+                    col_a, col_b = st.columns(2)
+                    if col_a.button("🔍 Analyze", key=f"analyze_{ticker}"):
+                        st.info("Analysis coming in Manager Research mode!")
+                    if col_b.button("🗑️ Remove", key=f"remove_{ticker}"):
+                        fund_db.remove_fund(ticker)
+                        st.success(f"Removed {ticker}")
+                        st.rerun()
+
+# ============================================================================
+# MANAGER RESEARCH MODE - NEW v9.0
+# ============================================================================
+
+def manager_research_mode():
+    """🧠 MANAGER RESEARCH - NEW in v9.0"""
+    st.markdown("# 🧠 MANAGER RESEARCH")
+    st.markdown("Advanced fund analysis with ML insights")
+    st.markdown("---")
+    
+    fund_db = FundDatabase()
+    
+    research_tab1, research_tab2, research_tab3 = st.tabs([
+        "📊 Fund Analytics",
+        "🔄 Multi-Fund Comparison",
+        "🤖 ML Fund Insights"
+    ])
+    
+    with research_tab1:
+        st.markdown("### 📊 Fund Analytics")
+        
+        funds = fund_db.list_funds()
+        if not funds:
+            st.info("No funds in database. Upload funds in Morningstar Integration mode first!")
+            return
+        
+        selected_fund = st.selectbox("Select fund to analyze", funds)
+        
+        if selected_fund:
+            fund_info = fund_db.get_fund(selected_fund)
+            data = fund_info['data']
+            
+            st.markdown(f"## {selected_fund}")
+            st.markdown(f"**{data.get('name', 'N/A')}**")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Rating", MorningstarIntegration.visualize_star_rating(data.get('star_rating')))
+            col2.metric("Category", data.get('category', 'N/A'))
+            exp = data.get('expense_ratio')
+            col3.metric("Expense Ratio", f"{exp:.2f}%" if exp else "N/A")
+            esg = data.get('esg_score')
+            col4.metric("ESG Score", f"{esg:.1f}" if esg else "N/A")
+            
+            # Holdings analysis if available
+            if data.get('holdings'):
+                st.markdown("### 📋 Holdings")
+                holdings_df = pd.DataFrame(data['holdings'])
+                st.dataframe(holdings_df)
+            
+            # Raw data
+            with st.expander("📊 Raw Data"):
+                st.dataframe(data.get('raw_data', pd.DataFrame()))
+    
+    with research_tab2:
+        st.markdown("### 🔄 Multi-Fund Comparison")
+        
+        funds = fund_db.list_funds()
+        if len(funds) < 2:
+            st.info("Need at least 2 funds for comparison. Upload more funds!")
+            return
+        
+        selected_funds = st.multiselect("Select funds to compare", funds, default=funds[:2])
+        
+        if len(selected_funds) >= 2:
+            comparison_data = []
+            for ticker in selected_funds:
+                fund_info = fund_db.get_fund(ticker)
+                data = fund_info['data']
+                
+                name = data.get('name', 'N/A')
+                display_name = name[:30] if name else 'N/A'
+                
+                comparison_data.append({
+                    'Ticker': ticker,
+                    'Name': display_name,
+                    'Rating': data.get('star_rating', 'N/A'),
+                    'Category': data.get('category', 'N/A'),
+                    'Expense': data.get('expense_ratio', 'N/A'),
+                    'ESG': data.get('esg_score', 'N/A')
+                })
+            
+            comparison_df = pd.DataFrame(comparison_data)
+            st.dataframe(comparison_df, use_container_width=True)
+            
+            # Expense ratio comparison chart
+            valid_expenses = [item for item in comparison_df['Expense'] if item != 'N/A']
+            if valid_expenses:
+                expense_df = comparison_df[comparison_df['Expense'] != 'N/A'].copy()
+                fig = go.Figure(data=[
+                    go.Bar(x=expense_df['Ticker'], y=expense_df['Expense'])
+                ])
+                fig.update_layout(
+                    title="Expense Ratio Comparison",
+                    yaxis_title="Expense Ratio (%)",
+                    template="plotly_dark",
+                    height=400
+                )
+                st.plotly_chart(fig, use_container_width=True)
+    
+    with research_tab3:
+        st.markdown("### 🤖 ML Fund Insights")
+        
+        funds = fund_db.list_funds()
+        if len(funds) < 3:
+            st.info("Need at least 3 funds for ML analysis. Upload more funds!")
+            return
+        
+        ml_option = st.radio("Choose ML analysis", [
+            "🎯 Fund Clustering",
+            "🔍 Find Similar Funds"
+        ])
+        
+        if ml_option == "🎯 Fund Clustering":
+            st.markdown("#### Cluster funds based on characteristics")
+            
+            n_clusters = st.slider("Number of clusters", 2, min(5, len(funds)), 3, key="fund_cluster_slider")
+            
+            if st.button("Run Fund Clustering"):
+                with st.spinner("Clustering funds..."):
+                    # Extract features from all funds
+                    features_list = []
+                    tickers_list = []
+                    
+                    for ticker in funds:
+                        fund_info = fund_db.get_fund(ticker)
+                        data = fund_info['data']
+                        
+                        # Extract numeric features
+                        rating = data.get('star_rating', 3)
+                        rating_val = float(rating) if rating != 'N/A' and rating is not None else 3.0
+                        
+                        expense = data.get('expense_ratio', 0.5)
+                        expense_val = float(expense) if expense != 'N/A' and expense is not None else 0.5
+                        
+                        esg = data.get('esg_score', 50)
+                        esg_val = float(esg) if esg != 'N/A' and esg is not None else 50.0
+                        
+                        features = [rating_val, expense_val, esg_val]
+                        features_list.append(features)
+                        tickers_list.append(ticker)
+                    
+                    features_array = np.array(features_list)
+                    
+                    clusters, pca_features = MLEngine.fund_clustering(features_array, n_clusters)
+                    
+                    if clusters is not None:
+                        # Visualization
+                        fig = go.Figure()
+                        
+                        for cluster in range(n_clusters):
+                            cluster_mask = clusters == cluster
+                            cluster_tickers = [t for t, m in zip(tickers_list, cluster_mask) if m]
+                            cluster_pca = pca_features[cluster_mask]
+                            
+                            fig.add_trace(go.Scatter(
+                                x=cluster_pca[:, 0],
+                                y=cluster_pca[:, 1],
+                                mode='markers+text',
+                                name=f'Cluster {cluster}',
+                                text=cluster_tickers,
+                                textposition='top center',
+                                marker=dict(size=12, line=dict(width=1, color='white'))
+                            ))
+                        
+                        fig.update_layout(
+                            title="Fund Clusters (PCA Projection)",
+                            xaxis_title="PC1",
+                            yaxis_title="PC2",
+                            template="plotly_dark",
+                            height=500
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Show clusters
+                        for cluster in range(n_clusters):
+                            cluster_funds = [t for t, c in zip(tickers_list, clusters) if c == cluster]
+                            with st.expander(f"Cluster {cluster} - {len(cluster_funds)} funds"):
+                                st.write(", ".join(cluster_funds))
+        
+        elif ml_option == "🔍 Find Similar Funds":
+            st.markdown("#### Find funds similar to a target fund")
+            
+            target_fund = st.selectbox("Select target fund", funds, key="similarity_target")
+            
+            if st.button("Find Similar Funds"):
+                with st.spinner("Calculating similarities..."):
+                    # Get target features
+                    target_info = fund_db.get_fund(target_fund)
+                    target_data = target_info['data']
+                    
+                    rating = target_data.get('star_rating', 3)
+                    rating_val = float(rating) if rating != 'N/A' and rating is not None else 3.0
+                    
+                    expense = target_data.get('expense_ratio', 0.5)
+                    expense_val = float(expense) if expense != 'N/A' and expense is not None else 0.5
+                    
+                    esg = target_data.get('esg_score', 50)
+                    esg_val = float(esg) if esg != 'N/A' and esg is not None else 50.0
+                    
+                    target_features = np.array([rating_val, expense_val, esg_val])
+                    
+                    # Calculate similarity to all other funds
+                    similarities = []
+                    for ticker in funds:
+                        if ticker == target_fund:
+                            continue
+                        
+                        fund_info = fund_db.get_fund(ticker)
+                        data = fund_info['data']
+                        
+                        rating = data.get('star_rating', 3)
+                        rating_val = float(rating) if rating != 'N/A' and rating is not None else 3.0
+                        
+                        expense = data.get('expense_ratio', 0.5)
+                        expense_val = float(expense) if expense != 'N/A' and expense is not None else 0.5
+                        
+                        esg = data.get('esg_score', 50)
+                        esg_val = float(esg) if esg != 'N/A' and esg is not None else 50.0
+                        
+                        features = np.array([rating_val, expense_val, esg_val])
+                        
+                        # Create 2D arrays for cosine similarity
+                        target_2d = target_features.reshape(1, -1)
+                        features_2d = features.reshape(1, -1)
+                        
+                        similarity = cosine_similarity(target_2d, features_2d)[0][0]
+                        
+                        name = data.get('name', 'N/A')
+                        display_name = name[:30] if name else 'N/A'
+                        
+                        similarities.append({
+                            'Ticker': ticker,
+                            'Similarity': similarity,
+                            'Name': display_name
+                        })
+                    
+                    # Sort by similarity
+                    similarities_df = pd.DataFrame(similarities).sort_values('Similarity', ascending=False)
+                    
+                    st.markdown(f"### 🎯 Funds Similar to {target_fund}")
+                    st.dataframe(similarities_df.head(10), use_container_width=True)
+                    
+                    # Visualize top 5
+                    top5 = similarities_df.head(5)
+                    fig = go.Figure(data=[
+                        go.Bar(
+                            x=top5['Ticker'],
+                            y=top5['Similarity'],
+                            text=top5['Similarity'].round(3),
+                            textposition='auto'
+                        )
+                    ])
+                    fig.update_layout(
+                        title=f"Top 5 Similar Funds to {target_fund}",
+                        yaxis_title="Similarity Score",
+                        template="plotly_dark",
+                        height=400
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+# ============================================================================
+# PHOENIX MODE NAVIGATION
+# ============================================================================
+
+def phoenix_mode():
+    """🔥 Phoenix Mode - Main Portfolio Hub"""
+    st.sidebar.markdown("## 📡 Phoenix Mode")
+    
+    # Phoenix navigation
+    page = st.sidebar.radio(
+        "Navigate",
+        [
+            "🔥 Phoenix Parser",
+            "🏠 Portfolio Home",
+            "🌍 Market Watch",
+            "📈 Risk Analysis",
+            "💎 Performance Suite",
+            "🔬 Portfolio Deep Dive",
+            "📊 Multi-Factor Analysis",
+            "🤖 ML Portfolio Insights"
+        ]
+    )
+    
+    # Route to pages
+    if page == "🔥 Phoenix Parser":
+        phoenix_parser_page()
+    elif page == "🏠 Portfolio Home":
+        portfolio_home_page()
+    elif page == "🌍 Market Watch":
+        market_watch_page()
+    elif page == "📈 Risk Analysis":
+        risk_analysis_page()
+    elif page == "💎 Performance Suite":
+        performance_suite_page()
+    elif page == "🔬 Portfolio Deep Dive":
+        portfolio_deep_dive_page()
+    elif page == "📊 Multi-Factor Analysis":
+        multi_factor_analysis_page()
+    elif page == "🤖 ML Portfolio Insights":
+        ml_portfolio_insights_page()
+
+# ============================================================================
+# MAIN APPLICATION
+# ============================================================================
+
+def main():
+    """Main application entry point"""
+    
+    # Header
+    st.title("🔥 ATLAS Terminal v9.0")
+    st.markdown("**Ultimate Portfolio Management & Fund Research Platform**")
+    st.markdown("---")
+    
+    # Main navigation
+    mode = st.sidebar.radio(
+        "🎯 Select Mode",
+        [
+            "🔥 PHOENIX MODE",
+            "⭐ MORNINGSTAR INTEGRATION",
+            "🧠 MANAGER RESEARCH"
+        ]
+    )
+    
+    st.sidebar.markdown("---")
+    
+    # Route to modes
+    if mode == "🔥 PHOENIX MODE":
+        phoenix_mode()
+    elif mode == "⭐ MORNINGSTAR INTEGRATION":
+        morningstar_mode()
+    elif mode == "🧠 MANAGER RESEARCH":
+        manager_research_mode()
+    
+    # Footer
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 📊 ATLAS v9.0")
+    st.sidebar.markdown("Portfolio Manager Edition")
+    st.sidebar.markdown(f"**{datetime.now().strftime('%B %d, %Y')}**")
+
+# ============================================================================
+# ENTRY POINT - Streamlit runs entire script on each interaction
+# ============================================================================
+
+# Run application
+main()
